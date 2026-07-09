@@ -1,4 +1,18 @@
-# Ring
+<h1 align="center">ring</h1>
+
+<p align="center">
+  Unofficial packages for Ring Doorbells, Cameras, Alarm System, and Smart Lighting.
+</p>
+
+<!-- BADGES:START -->
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/7onnie/ring"></a>
+  <a href="https://buymeacoffee.com/7onnie"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black"></a>
+</p>
+<!-- BADGES:END -->
+
+> [!NOTE]
+> Fork of [dgreif/ring](https://github.com/dgreif/ring).
 
 This repo contains unofficial packages to enable interaction and automation with the majority of [Ring](https://ring.com/) products
 

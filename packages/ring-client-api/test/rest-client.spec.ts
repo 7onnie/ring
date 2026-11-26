@@ -11,7 +11,14 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest'
+
+// skip the real backoff delays (5s+) so retry paths run fast
+vi.mock('../util.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../util.ts')>()),
+  delay: () => Promise.resolve(),
+}))
 
 let sessionCreatedCount = 0,
   client: RingRestClient
@@ -305,6 +312,92 @@ describe('getAuth', () => {
       oldRefreshToken: refreshToken,
       newRefreshToken: await wrapRefreshToken(secondRefreshToken),
     })
+  })
+})
+
+describe('getAuth with transient oauth errors', () => {
+  let refreshGrantTokens: string[] = []
+
+  // respond with each of `failures` in order for refresh grants, then fall through to the default handler
+  function failRefreshGrant(failures: (number | 'network')[]) {
+    const queue = [...failures]
+    server.use(
+      http.post(
+        'https://oauth.ring.com/oauth/token',
+        async ({ request: req }) => {
+          const body: any = await req.clone().json()
+          if (body.grant_type !== 'refresh_token') {
+            return
+          }
+          refreshGrantTokens.push(body.refresh_token)
+          const failure = queue.shift()
+          if (failure === 'network') {
+            return HttpResponse.error()
+          }
+          if (failure) {
+            return HttpResponse.json({ error: 'upstream' }, { status: failure })
+          }
+          // no more failures, use default handler
+        },
+      ),
+    )
+  }
+
+  beforeEach(() => {
+    refreshGrantTokens = []
+  })
+
+  afterEach(() => {
+    // drop the per-test handlers so they don't leak into other tests
+    server.resetHandlers()
+  })
+
+  it('keeps the refresh token on 503 and retries with it', async () => {
+    failRefreshGrant([503])
+    client = new RingRestClient({ refreshToken })
+
+    expect(await client.getAuth()).toMatchObject({
+      access_token: accessToken,
+      refresh_token: await wrapRefreshToken(secondRefreshToken),
+    })
+    expect(refreshGrantTokens).toEqual([refreshToken, refreshToken])
+  })
+
+  it('keeps the refresh token on 429 and retries with it', async () => {
+    failRefreshGrant([429])
+    client = new RingRestClient({ refreshToken })
+
+    await client.getAuth()
+    expect(refreshGrantTokens).toEqual([refreshToken, refreshToken])
+  })
+
+  it('keeps the refresh token on a network error', async () => {
+    failRefreshGrant(['network'])
+    client = new RingRestClient({ refreshToken })
+
+    expect(await client.getAuth()).toMatchObject({
+      access_token: accessToken,
+    })
+    expect(refreshGrantTokens).toEqual([refreshToken, refreshToken])
+  })
+
+  it('keeps the refresh token after retries are exhausted', async () => {
+    failRefreshGrant(Array(20).fill(503))
+    client = new RingRestClient({ refreshToken })
+    const original = client.refreshToken
+
+    await expect(() => client.getAuth()).rejects.toThrow()
+    expect(client.refreshToken).toEqual(original)
+    expect(new Set(refreshGrantTokens)).toEqual(new Set([refreshToken]))
+  })
+
+  it('discards the refresh token on invalid_grant', async () => {
+    client = new RingRestClient({ refreshToken: 'ey__revoked_refresh_token' })
+
+    await expect(() => client.getAuth()).rejects.toThrow(
+      'Refresh token is not valid',
+    )
+    expect(client.refreshToken).toBeUndefined()
   })
 })
 

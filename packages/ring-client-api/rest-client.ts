@@ -190,6 +190,24 @@ async function requestWithRetry<T>(
   }
 }
 
+const maxTransientAuthRetries = 5
+
+/**
+ * True when an oauth failure says nothing about the validity of the refresh token:
+ * no response at all (network/timeout), 408, 429 and 5xx.
+ */
+function isTransientAuthError(error: any) {
+  const status = (error as Partial<ResponseError>)?.response?.status
+  return (
+    status === undefined || status === 408 || status === 429 || status >= 500
+  )
+}
+
+function describeAuthError(error: any) {
+  const status = error?.response?.status
+  return status ? `HTTP ${status}` : `Error: ${error?.message}`
+}
+
 export interface EmailAuth {
   email: string
   password: string
@@ -313,7 +331,10 @@ export class RingRestClient {
     )
   }
 
-  async getAuth(twoFactorAuthCode?: string): Promise<AuthTokenResponse> {
+  async getAuth(
+    twoFactorAuthCode?: string,
+    transientRetryCount = 0,
+  ): Promise<AuthTokenResponse> {
     const grantData = this.getGrantData(twoFactorAuthCode)
 
     try {
@@ -355,6 +376,25 @@ export class RingRestClient {
         refresh_token: this.refreshToken,
       }
     } catch (requestError: any) {
+      if (grantData.refresh_token && isTransientAuthError(requestError)) {
+        // Ring rotates refresh tokens, so a temporary failure (5xx, 429, timeout) must not throw the token away.
+        // Keep it and retry with a bounded backoff.
+        if (transientRetryCount < maxTransientAuthRetries) {
+          const waitMs = 5000 * 2 ** transientRetryCount
+          logError(
+            `Temporary error fetching oauth token from Ring (${describeAuthError(requestError)}). Keeping refresh token and retrying in ${waitMs / 1000} seconds...`,
+          )
+          await delay(waitMs)
+          return this.getAuth(twoFactorAuthCode, transientRetryCount + 1)
+        }
+
+        logError(requestError.response || requestError)
+        throw new Error(
+          `Failed to fetch oauth token from Ring after ${maxTransientAuthRetries} retries (${describeAuthError(requestError)}). The refresh token was kept.`,
+          { cause: requestError },
+        )
+      }
+
       if (grantData.refresh_token) {
         // failed request with refresh token
         this.refreshToken = undefined

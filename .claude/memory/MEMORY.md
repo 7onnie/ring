@@ -1,0 +1,1 @@
+- [punkt0-kommentar](punkt0-kommentar.md) — Wo ring-client-api den Refresh-Token verwirft (rest-client.ts getAuth catch) und dass requestWithRetry Netzwerkfehler endlos wiederholt

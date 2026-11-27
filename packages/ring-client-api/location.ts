@@ -101,7 +101,8 @@ export class Location extends Subscribed {
         return [...updatedDevices, new RingDevice(flatData, this, src)]
       }, devices)
     }, [] as RingDevice[]),
-    distinctUntilChanged((a, b) => a.length === b.length),
+    // Completeness check comes BEFORE the length dedupe: an empty list from the
+    // last hub does not change the device count but completes the set of hubs.
     filter(() => {
       return Boolean(
         this.assets &&
@@ -110,6 +111,7 @@ export class Location extends Subscribed {
           ),
       )
     }),
+    distinctUntilChanged((a, b) => a.length === b.length),
     shareReplay(1),
   )
   onSessionInfo = this.onDataUpdate.pipe(

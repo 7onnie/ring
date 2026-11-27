@@ -192,35 +192,46 @@ export class StreamingSession extends Subscribed {
         const rtp = RtpPacket.deSerialize(message)
         this.connection.sendAudioPacket(rtp)
         return null
-      }),
-      usingOpus = await this.isUsingOpus,
-      ff = new FfmpegProcess({
-        ffmpegArgs: [
-          '-hide_banner',
-          '-protocol_whitelist',
-          'pipe,udp,rtp,file,crypto',
-          '-re',
-          '-i',
-          ...ffmpegOptions.input,
-          '-acodec',
-          ...(usingOpus
-            ? ['libopus', '-ac', 2, '-ar', '48k']
-            : ['pcm_mulaw', '-ac', 1, '-ar', '8k']),
-          '-flags',
-          '+global_header',
-          '-f',
-          'rtp',
-          `rtp://127.0.0.1:${await audioOutForwarder.portPromise}`,
-        ],
-        ffmpegPath: getFfmpegPath(),
-        exitCallback: () => this.callEnded(),
-        logLabel: `Return Audio (${this.camera.name})`,
-        logger: {
-          error: logError,
-          info: logDebug,
-        },
       })
-    this.onCallEnded.pipe(take(1)).subscribe(() => ff.stop())
+
+    // Close the forwarder when the call ends (onCallEnded is a ReplaySubject,
+    // so this also fires immediately if the call already ended) ...
+    this.onCallEnded.pipe(take(1)).subscribe(() => audioOutForwarder.close())
+
+    try {
+      const usingOpus = await this.isUsingOpus,
+        ff = new FfmpegProcess({
+          ffmpegArgs: [
+            '-hide_banner',
+            '-protocol_whitelist',
+            'pipe,udp,rtp,file,crypto',
+            '-re',
+            '-i',
+            ...ffmpegOptions.input,
+            '-acodec',
+            ...(usingOpus
+              ? ['libopus', '-ac', 2, '-ar', '48k']
+              : ['pcm_mulaw', '-ac', 1, '-ar', '8k']),
+            '-flags',
+            '+global_header',
+            '-f',
+            'rtp',
+            `rtp://127.0.0.1:${await audioOutForwarder.portPromise}`,
+          ],
+          ffmpegPath: getFfmpegPath(),
+          exitCallback: () => this.callEnded(),
+          logLabel: `Return Audio (${this.camera.name})`,
+          logger: {
+            error: logError,
+            info: logDebug,
+          },
+        })
+      this.onCallEnded.pipe(take(1)).subscribe(() => ff.stop())
+    } catch (e) {
+      // ... and on failure (e.g. connection error before the call was answered)
+      audioOutForwarder.close()
+      throw e
+    }
   }
 
   private hasEnded = false

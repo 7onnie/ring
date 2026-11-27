@@ -231,6 +231,21 @@ export class RingApi extends Subscribed {
     }
   }
 
+  private pushReceiver: PushReceiver | undefined
+
+  private destroyPushReceiver() {
+    const receiver = this.pushReceiver
+    this.pushReceiver = undefined
+    if (!receiver) {
+      return
+    }
+    try {
+      receiver.destroy()
+    } catch (e) {
+      logError(e)
+    }
+  }
+
   private async registerPushReceiver(
     cameras: RingCamera[],
     intercoms: RingIntercom[],
@@ -253,6 +268,11 @@ export class RingApi extends Subscribed {
         devicesById[id]?.processPushNotification(notification)
       },
       onPushNotificationToken = new Subject<string>()
+
+    // keep a handle so disconnect() can tear the receiver down
+
+    // keep a handle so disconnect() can tear the receiver down
+    this.pushReceiver = pushReceiver
 
     for (const camera of cameras) {
       devicesById[camera.id] = camera
@@ -508,6 +528,7 @@ export class RingApi extends Subscribed {
 
   disconnect() {
     this.unsubscribe()
+    this.destroyPushReceiver()
     if (!this.locationsPromise) {
       return
     }

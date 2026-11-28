@@ -101,6 +101,18 @@ describe('StreamingSession return audio (ring#4)', () => {
     expect(forwarder.close).toHaveBeenCalled()
   })
 
+  it('closes the UDP forwarder exactly once on failure followed by stop', async () => {
+    const { session, connection } = makeSession()
+    const pending = session.transcodeReturnAudio({ input: ['x'] })
+    connection.onError.next(new Error('boom'))
+    await expect(pending).rejects.toThrow('boom')
+
+    session.stop()
+    session.stop()
+
+    expect(mocks.splitters.at(-1).close).toHaveBeenCalledTimes(1)
+  })
+
   it('closes the UDP forwarder when setup fails', async () => {
     const { session, connection } = makeSession()
     const pending = session.transcodeReturnAudio({ input: ['x'] })

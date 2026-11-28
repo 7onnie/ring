@@ -194,9 +194,19 @@ export class StreamingSession extends Subscribed {
         return null
       })
 
+    // Close exactly once, whichever path (call end or setup failure) gets here first.
+    let forwarderClosed = false
+    const closeForwarder = () => {
+      if (forwarderClosed) {
+        return
+      }
+      forwarderClosed = true
+      audioOutForwarder.close()
+    }
+
     // Close the forwarder when the call ends (onCallEnded is a ReplaySubject,
     // so this also fires immediately if the call already ended) ...
-    this.onCallEnded.pipe(take(1)).subscribe(() => audioOutForwarder.close())
+    this.onCallEnded.pipe(take(1)).subscribe(closeForwarder)
 
     try {
       const usingOpus = await this.isUsingOpus,
@@ -229,7 +239,7 @@ export class StreamingSession extends Subscribed {
       this.onCallEnded.pipe(take(1)).subscribe(() => ff.stop())
     } catch (e) {
       // ... and on failure (e.g. connection error before the call was answered)
-      audioOutForwarder.close()
+      closeForwarder()
       throw e
     }
   }
